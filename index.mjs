@@ -1,62 +1,66 @@
-import { Client, Storage, Databases } from "node-appwrite";
-import exifr from "exifr";
-import { parse as parsePngText } from "png-metadata-extractor";
+import { Client, Databases, ID, Storage } from 'node-appwrite';
+import * as fs from 'node:fs';
+import * as exifr from 'exifr';
+import { extract } from 'png-metadata-extractor';
 
-export default async ({ variables, res }) => {
-  const event = JSON.parse(variables.APPWRITE_FUNCTION_EVENT_DATA);
-  const { $id: fileId, bucketId, mimeType } = event;
+const client = new Client()
+  .setEndpoint(process.env.APPWRITE_ENDPOINT)
+  .setProject(process.env.APPWRITE_PROJECT_ID)
+  .setKey(process.env.APPWRITE_API_KEY);
 
-  const client = new Client()
-    .setEndpoint(variables.APPWRITE_ENDPOINT)
-    .setProject(variables.APPWRITE_FUNCTION_PROJECT_ID)
-    .setKey(variables.APPWRITE_API_KEY);
+const storage = new Storage(client);
+const databases = new Databases(client);
 
-  const storage = new Storage(client);
-  const databases = new Databases(client);
+const BUCKET_ID = process.env.BUCKET_ID;
+const DATABASE_ID = process.env.DATABASE_ID;
+const COLLECTION_ID = process.env.COLLECTION_ID;
 
-  // Step 1: Download image file into buffera
-  const fileStream = await storage.getFileDownload(bucketId, fileId);
-  const chunks = [];
-  for await (const chunk of fileStream) chunks.push(chunk);
-  const buffer = Buffer.concat(chunks);
-
-  // Step 2: Parse metadata
-  let metadata = {};
-  if (mimeType === "image/png") {
-    // Parse PNG "parameters" field (for SD users)
-    const pngChunks = parsePngText(buffer);
-    const params = pngChunks.find(c => c.keyword === "parameters")?.text;
-    if (params) {
-      params.split(/\n/).forEach(line => {
-        const [key, ...rest] = line.split(/:\s*/);
-        if (key && rest.length > 0) {
-          metadata[key.toLowerCase().replace(/ /g, "_")] = rest.join(": ");
-        }
-      });
-    }
-  } else {
-    // Parse EXIF from JPEG/WebP/HEIC
-    metadata = await exifr.parse(buffer, { translateValues: false });
-  }
-
-  // Step 3: Create or update DB document
-  const docData = {
-    file_id: fileId,
-    bucket_id: bucketId,
-    mime_type: mimeType,
-    metadata,
-    created_at: new Date().toISOString()
-  };
-
+/**
+ * Entry point
+ */
+const main = async () => {
   try {
-    await databases.createDocument(
-      variables.DB_ID,
-      variables.COLLECTION_ID,
-      fileId,
-      docData
-    );
-    return res.json({ status: "created", metadata_keys: Object.keys(metadata) });
-  } catch (e) {
-    return res.json({ error: e.message });
+    const files = await storage.listFiles(BUCKET_ID);
+    for (const file of files.files) {
+      const fileId = file.$id;
+
+      // Download file
+      const buffer = await storage.getFileDownload(BUCKET_ID, fileId);
+      const tmpFilePath = `/tmp/${fileId}`;
+      await fs.promises.writeFile(tmpFilePath, Buffer.from(buffer));
+
+      let metadata = {};
+      if (file.mimeType === 'image/png') {
+        const raw = await extract(tmpFilePath);
+        metadata = raw?.tEXt ?? {};
+      } else {
+        metadata = await exifr.parse(tmpFilePath, { userComment: true }) || {};
+      }
+
+      const prompt = metadata?.prompt || metadata?.description || metadata?.UserComment || 'No prompt';
+      const model = metadata?.model || metadata?.Model || 'Unknown';
+      const software = metadata?.software || metadata?.Software || 'Unknown';
+
+      // Save to DB
+      await databases.createDocument(DATABASE_ID, COLLECTION_ID, ID.unique(), {
+        imageId: fileId,
+        prompt,
+        model,
+        software
+      });
+
+      // Clean up
+      await fs.promises.unlink(tmpFilePath);
+    }
+  } catch (err) {
+    const errorMessage =
+      typeof err === 'string'
+        ? err
+        : err instanceof Error
+          ? err.message
+          : JSON.stringify(err);
+    throw new Error(`Appwrite function failed: ${errorMessage}`);
   }
 };
+
+main();
