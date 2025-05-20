@@ -37,7 +37,7 @@ export default async ({ req, res, log, error }) => {
       const prompt = metadata?.prompt || metadata?.description || metadata?.UserComment;
       if (!prompt) {
         log(`Skipping file ${fileId}: no prompt`);
-        continue; // Skip if required field missing
+        continue; // Skip if required field is not found
       }
 
       const model = metadata?.model || metadata?.Model || null;
