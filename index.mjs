@@ -14,7 +14,7 @@ export default async ({ variables, res }) => {
   const storage = new Storage(client);
   const databases = new Databases(client);
 
-  // Step 1: Download image file into buffer
+  // Step 1: Download image file into buffera
   const fileStream = await storage.getFileDownload(bucketId, fileId);
   const chunks = [];
   for await (const chunk of fileStream) chunks.push(chunk);
