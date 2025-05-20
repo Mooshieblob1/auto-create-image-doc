@@ -34,30 +34,36 @@ export default async ({ req, res, log, error }) => {
         metadata = await exifr.parse(tmpFilePath, { userComment: true }) || {};
       }
 
-      const prompt = metadata?.prompt || metadata?.description || metadata?.UserComment || 'No prompt';
-      const model = metadata?.model || metadata?.Model || 'Unknown';
-      const software = metadata?.software || metadata?.Software || 'Unknown';
+      const prompt = metadata?.prompt || metadata?.description || metadata?.UserComment;
+      if (!prompt) {
+        log(`Skipping file ${fileId}: no prompt`);
+        continue; // Skip if required field missing
+      }
+
+      const model = metadata?.model || metadata?.Model || null;
+      const tags = []; // Add extraction logic here if needed
+      const createdAt = new Date().toISOString();
 
       await databases.createDocument(DATABASE_ID, COLLECTION_ID, ID.unique(), {
         imageId: fileId,
         prompt,
         model,
-        software
+        tags,
+        createdAt
       });
 
       await fs.unlink(tmpFilePath);
     }
 
-    return res.json({ success: true, message: "Images processed successfully." });
-
+    return res.json({ success: true, message: "All images processed." });
   } catch (err) {
-    const message = typeof err === 'string'
+    const msg = typeof err === 'string'
       ? err
       : err instanceof Error
         ? err.message
         : JSON.stringify(err);
 
-    error("Function failed: " + message);
-    return res.json({ success: false, error: message });
+    error("Processing failed: " + msg);
+    return res.json({ success: false, error: msg });
   }
 };
