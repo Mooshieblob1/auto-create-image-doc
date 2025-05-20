@@ -1,0 +1,8 @@
+{
+  "type": "module",
+  "dependencies": {
+    "node-appwrite": "^11.0.0",
+    "exifr": "^10.6.4",
+    "png-metadata-extractor": "^1.0.4"
+  }
+}
